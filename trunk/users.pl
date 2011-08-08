@@ -7,32 +7,33 @@ use Lingua::Translit;
 my $debug = 0;
 my $warning = 0;
 
-#name or IP of Domain controller
-my $ADcontroller="dc";
+### name or IP of Domain controller
+my $ADcontroller="dc.mydomain";
 
-#Domain name in format AD
-#for example  mydomain.ru
-my $ADDC="DC=mydomain, DC=ru";
+### Domain name in format AD
+### for example  mydomain.ru
+my $ADDC="DC=mydomain";
 
-# BIND user in Active directory
-# example: "CN=asterisk,CN=Users,$ADDC"
+### bind user in Active directory
+### example: "CN=asterisk,CN=Users,$ADDC"
 my $ADUserBind="CN=asterisk,CN=Users,$ADDC";
 my $ADpass="p@s$w0rd";
 
-# base search tree
-# example "OU=Users,$ADDC"
-my $ADUsersSearchBase="OU=MyOrganisation,$ADDC";
+### base search tree
+### example "OU=Users,$ADDC"
+my $ADUsersSearchBase="OU=eKassir,$ADDC";
 
-#Field in active directory where telephone number, display name, phone stored
-# "telephonenumber", "displayname", "mail"
+### Field in active directory where telephone number, display name, phone stored
+### "telephonenumber", "displayname", "mail"
 my $ADfieldTelephone="telephonenumber";
 my $ADfieldFullName="displayname";
 my $ADfieldMail="mail";
+my $ADfieldUser="samaccountname";
 
-#You need to create a dialplan in your asterisk server;
+### You need to create a dialplan in your asterisk server;
 my $dialplan="office";
 
-# default settings
+### default settings for asterisk users
 my $user_static = 
 "context = $dialplan
 call-limit = 100
@@ -40,7 +41,6 @@ type = friend
 registersip = no
 host = dynamic
 callgroup = 1
-hasvoicemail = yes
 threewaycalling = no
 hasdirectory = no
 callwaiting = no
@@ -75,7 +75,7 @@ my $mesg = $ldap->bind ( dn=>$ADUserBind, password =>$ADpass);
 my $ldapUsers = LDAPsearch ( 
 	$ADUsersSearchBase, 
 	"$ADfieldTelephone=*",  
-	[ $ADfieldFullName, $ADfieldTelephone, $ADfieldMail ]
+	[ $ADfieldFullName, $ADfieldTelephone, $ADfieldMail, $ADfieldUser ]
 )->as_struct;
 
 # translit RUS module.
@@ -89,10 +89,12 @@ while ( my ($distinguishedName, $attrs) = each(%$ldapUsers) ) {
 #	print $_, "\n";
 	# if not exist phone or name - skipping
 	my $attrPhone = $attrs->{ "$ADfieldTelephone" } || next;	
+	my $attrUser = $attrs->{ "$ADfieldUser" } || next;
 	my $attrName = $attrs->{ "$ADfieldFullName" } || next;	
 	my $encName = $tr->translit("@$attrName");	
 	my $attrMail = $attrs->{ "$ADfieldMail" } || [""];
-	
+
+
 	# check for duplicates phone number
 	if ( $phones -> {"@$attrPhone"} ){
 		my $currUser = "@$attrName";
@@ -111,8 +113,7 @@ while ( my ($distinguishedName, $attrs) = each(%$ldapUsers) ) {
 	
 	print "fullname = $encName\n";
 	print "email = @$attrMail\n";
-	print "username = @$attrPhone\n";	
-	#print "mailbox = @$attrPhone\n";
+	print "username = @$attrUser\n";
 	print "cid_number = @$attrPhone\n";
 	print "vmsecret = $phsecret\n";
 	print "secret = $phsecret\n";
@@ -122,8 +123,8 @@ while ( my ($distinguishedName, $attrs) = each(%$ldapUsers) ) {
 	print "$user_static\n";	
 }	# End of that DN
 
-#OPERATION - Generating a SEARCH 
-#$base, $searchString, $attrsArray
+### OPERATION - Generating a SEARCH 
+### $base, $searchString, $attrsArray
 sub LDAPsearch
 {
 	my ($base, $searchString, $attrs) = @_;
@@ -144,5 +145,4 @@ sub LDAPerror
 		."\nError: " . $mesg->error . " (" . $mesg->error_name . ")"
 		."\nDescripton: " . $mesg->error_desc . ". " . $mesg->error_text;
 	print STDERR $err if $warning;
-	#print "\nServer error: " . $mesg->server_error if $debug;
 }
