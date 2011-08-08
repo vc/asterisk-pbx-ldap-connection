@@ -1,39 +1,53 @@
 #!/usr/bin/perl
+# users.pl v1.1
+#
+# Script to generate asterisk 'users.conf' file from Active Directory (LADP) on users which contains 'phone' attribute
+# 
+# Using:
+# 1. Print users to STDOUT:
+# users.pl 
+#
+# 2. Print users to file:
+# users.pl users_custom.conf
+
 use strict;
 use warnings;
 use Net::LDAP;
 use Lingua::Translit;
 
+######################
+### BEGIN SETTINGS ###
+######################
 my $debug = 0;
 my $warning = 0;
 
-### name or IP of Domain controller
-my $ADcontroller="dc.mydomain";
+# name of Domain
+my $AD="domain";
 
-### Domain name in format AD
-### for example  mydomain.ru
-my $ADDC="DC=mydomain";
+# Domain name in format AD
+# for example  mydomain.ru
+my $ADDC="DC=domain";
 
-### bind user in Active directory
-### example: "CN=asterisk,CN=Users,$ADDC"
+# user in Active directory
+# example: "CN=asterisk,CN=Users,$ADDC"
 my $ADUserBind="CN=asterisk,CN=Users,$ADDC";
 my $ADpass="p@s$w0rd";
 
-### base search tree
-### example "OU=Users,$ADDC"
-my $ADUsersSearchBase="OU=eKassir,$ADDC";
+# base search tree
+# example "OU=Users,$ADDC"
+my $ADUsersSearchBase="OU=Organisation,$ADDC";
 
-### Field in active directory where telephone number, display name, phone stored
-### "telephonenumber", "displayname", "mail"
+# Field in active directory where telephone number, display name, phone stored
+# "telephonenumber", "displayname", "mail"
 my $ADfieldTelephone="telephonenumber";
 my $ADfieldFullName="displayname";
 my $ADfieldMail="mail";
 my $ADfieldUser="samaccountname";
 
-### You need to create a dialplan in your asterisk server;
+# You need to create a dialplan in your asterisk server;
 my $dialplan="office";
 
-### default settings for asterisk users
+# default settings
 my $user_static = 
 "context = $dialplan
 call-limit = 100
@@ -62,11 +76,25 @@ callcounter = yes
 disallow = all
 allow = ulaw,alaw,iLBC,h263,h263p
 ";
+#######################
+### END OF SETTINGS ###
+#######################
 
-#INITIALIZING
-my $ldap = Net::LDAP->new ( $ADcontroller ) or die "$@";
+my $ldap;
 
-#BINDING
+# get array DNS names of AD controllers
+my $dig = "dig -t srv _ldap._tcp.$AD" . '| grep -v "^;\|^$" | grep SRV | awk "{print \$8}"';
+my @adControllers = `$dig`;
+# try connect to AD controllers
+foreach my $controller (@adControllers){
+	$controller =~ s/\n//;
+	#INITIALIZING
+	$ldap = Net::LDAP->new ( $controller ) or next;
+	print STDERR "Connected to AD controller: $controller\n" if $debug > 0;
+	last;
+}
+die "$@" unless $ldap; 
+
 my $mesg = $ldap->bind ( dn=>$ADUserBind, password =>$ADpass);
 
 #PROCESSING - Displaying SEARCH Results
@@ -85,8 +113,9 @@ my $tr = new Lingua::Translit("GOST 7.79 RUS");
 my %hashPhones = ();
 my $phones = \%hashPhones;
 
+my @out;
+
 while ( my ($distinguishedName, $attrs) = each(%$ldapUsers) ) {
-#	print $_, "\n";
 	# if not exist phone or name - skipping
 	my $attrPhone = $attrs->{ "$ADfieldTelephone" } || next;	
 	my $attrUser = $attrs->{ "$ADfieldUser" } || next;
@@ -109,22 +138,37 @@ while ( my ($distinguishedName, $attrs) = each(%$ldapUsers) ) {
 	# example: phone=6232 pass=233
 	#$phsecret =sprintf("%03d",( substr("@$attrVal",1,100)+1));
 	my $phsecret = "@$attrPhone";
-	print "[@$attrPhone]\n";
-	
-	print "fullname = $encName\n";
-	print "email = @$attrMail\n";
-	print "username = @$attrUser\n";
-	print "cid_number = @$attrPhone\n";
-	print "vmsecret = $phsecret\n";
-	print "secret = $phsecret\n";
-	
-	print "transfer = yes\n";
-	
-	print "$user_static\n";	
+	push (@out,  
+		"[@$attrPhone]\n"
+		. "fullname = $encName\n"
+		. "email = @$attrMail\n"
+		. "username = @$attrUser\n"
+		#. "mailbox = @$attrPhone\n"
+		. "cid_number = @$attrPhone\n"
+		. "vmsecret = $phsecret\n"
+		. "secret = $phsecret\n"	
+		. "transfer = yes\n"	
+		. "$user_static\n"
+	);
 }	# End of that DN
 
-### OPERATION - Generating a SEARCH 
-### $base, $searchString, $attrsArray
+# print to file
+if (@ARGV){
+	open FILE, "> $ARGV[0]" or die "Error create file '$ARGV[0]': $!";
+	print STDOUT "Printing to file '$ARGV[0]'";
+	print FILE @out;	
+	close FILE;
+	print STDOUT " ...done!\n";
+}
+# print to STDOUT
+else{
+	print @out;
+}
+
+exit 0;
+
+#OPERATION - Generating a SEARCH 
+#$base, $searchString, $attrsArray
 sub LDAPsearch
 {
 	my ($base, $searchString, $attrs) = @_;
