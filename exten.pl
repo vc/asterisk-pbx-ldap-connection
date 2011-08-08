@@ -1,4 +1,17 @@
 #!/usr/bin/perl
+# exten.pl v1.1
+#
+# Script to generate extensions 'extensions_custom.conf' file, 
+# from Active Directory (LADP) on groups in OU=ADGroupsSearchBase 
+# which groups contains 'description' attribute
+# 
+# Using:
+# 1. Print users to STDOUT:
+# exten.pl 
+#
+# 2. Print users to file:
+# exten.pl exten_custom.conf
+
 use strict;
 use warnings;
 use Net::LDAP;
@@ -10,12 +23,12 @@ use Lingua::Translit;
 my $debug = 0;
 my $warning = 1;
 
-# name of Domain
-my $AD="mydomain";
+#name of Domain
+my $AD="domain";
 
-# Domain name in format AD
-# for example  mydomain.ru
-my $ADDC="DC=mydomain";
+#Domain name in format AD
+#for example  mydomain.ru
+my $ADDC="DC=domain";
 
 # user in Active directory
 # example: "CN=asterisk,CN=Users,$ADDC"
@@ -23,9 +36,12 @@ my $ADUserBind="CN=asterisk,CN=Users,$ADDC";
 my $ADpass="p@s$w0rd";
 
 # base search Groups tree example "OU=Users,$ADDC"
-my $ADGroupsSearchBase = "OU=asterisk,OU=Groups,OU=eKassir,$ADDC";
+my $ADGroupsSearchBase = "OU=asterisk,OU=Groups,OU=Organisation,$ADDC";
 # base search Users tree example "OU=Users,$ADDC"
-my $ADUsersSearchBase = "OU=eKassir,$ADDC";
+my $ADUsersSearchBase = "OU=Organisation,$ADDC";
+
+# default email to send voicemail if email user not set
+my $defaultEmail = 'asterisk@Organisation.com';
 
 # Field in active directory where telephone number, display name, phone stored ...
 # "telephonenumber", "displayname", "mail", ...
@@ -103,10 +119,25 @@ while ( my ($distinguishedName, $groupAttrs) = each(%$ldapGroups) ) {
 	print STDERR "\n\n" if $debug > 1;	
 }	# End of that groups in $ADGroupsSearchBase
 
+my @out;
+
 while ( my ($groupPhone, $userPhones) = each (%$hash) ) {	
 	print STDERR "GROUP: $groupPhone\t PHONES: @$userPhones\n" if $debug > 1;
 	#foreach my $userPhone (@$userPhones)	{
-	print "exten => $groupPhone,1,Dial(sip/" . join('&sip/', @$userPhones) . ")\n";	
+	push (@out, "exten => $groupPhone,1,Dial(sip/" . join('&sip/', @$userPhones) . ")\n");	
+}
+
+# print to file
+if (@ARGV){
+	open FILE, "> $ARGV[0]" or die "Error create file '$ARGV[0]': $!";
+	print STDOUT "Printing to file '$ARGV[0]'";
+	print FILE @out;	
+	close FILE;
+	print STDOUT " ...done!\n";
+}
+# print to STDOUT
+else{
+	print @out;
 }
 
 exit 0;
