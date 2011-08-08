@@ -4,13 +4,18 @@ use warnings;
 use Net::LDAP;
 use Lingua::Translit;
 
-###### BEGIN USER SETTINGS ######
-#name or IP of Domain controller
-my $ADcontroller="dc";
+######################
+### BEGIN SETTINGS ###
+######################
+my $debug = 0;
+my $warning = 1;
 
-#Domain name in format AD
-#for example  DC=mydomain.ru
-my $ADDC="DC=mydomain,DC=ru";
+# name of Domain
+my $AD="mydomain";
+
+# Domain name in format AD
+# for example  mydomain.ru
+my $ADDC="DC=mydomain";
 
 # user in Active directory
 # example: "CN=asterisk,CN=Users,$ADDC"
@@ -18,12 +23,9 @@ my $ADUserBind="CN=asterisk,CN=Users,$ADDC";
 my $ADpass="p@s$w0rd";
 
 # base search Groups tree example "OU=Users,$ADDC"
-my $ADGroupsSearchBase = "OU=asterisk,OU=Groups,$ADDC";
+my $ADGroupsSearchBase = "OU=asterisk,OU=Groups,OU=eKassir,$ADDC";
 # base search Users tree example "OU=Users,$ADDC"
-my $ADUsersSearchBase = "OU=MyOrganisation,$ADDC";
-
-# default email to send voicemail if email user not set
-my $defaultEmail = 'asterisk@mydomain.ru';
+my $ADUsersSearchBase = "OU=eKassir,$ADDC";
 
 # Field in active directory where telephone number, display name, phone stored ...
 # "telephonenumber", "displayname", "mail", ...
@@ -33,14 +35,24 @@ my $ADfieldMemberOf = "memberof";
 my $ADfieldInfo = "info";
 my $ADfieldDescription = "description";
 my $ADfieldMail = "mail";
+#######################
+### END OF SETTINGS ###
+#######################
 
-# Debug flags.
-my $debug = 0;
-my $warning = 1;
-###### END USER SETTINGS ######
+my $ldap;
 
-#INITIALIZING & BINDING
-my $ldap = Net::LDAP->new ( $ADcontroller ) or die "$@";
+# get array DNS names of AD controllers
+my @adControllers = `dig -t srv _ldap._tcp.$AD | grep -v '^;\\|^\$' | grep SRV | awk '{print \$8}'`;
+# try connect to AD controllers
+foreach my $controller (@adControllers){
+	$controller =~ s/\n//;
+	#INITIALIZING
+	$ldap = Net::LDAP->new ( $controller ) or next;
+	print STDERR "Connected to AD controller: $controller\n" if $debug > 0;
+	last;
+}
+die "$@" unless $ldap; 
+
 my $mesg = $ldap->bind ( dn=>$ADUserBind, password =>$ADpass);
 
 #PROCESSING - Displaying SEARCH Results
@@ -60,12 +72,12 @@ my $hash = ();
 
 # process each group in $ADGroupsSearchBase with phone
 while ( my ($distinguishedName, $groupAttrs) = each(%$ldapGroups) ) {
-	print "Processing GROUP: [$distinguishedName]\n" if $debug;
+	print STDERR "Processing GROUP: [$distinguishedName]\n" if $debug > 1;
 	my $attrMembers = $groupAttrs->{ $ADfieldMember } or next;
 	my $desc = $groupAttrs->{ $ADfieldDescription } or next;
 	my $groupNumber = "@$desc";
 	
-	print "MEMBERS: @$attrMembers\nDESC: $groupNumber  (Count=$#$attrMembers+1)" if $debug;
+	print STDERR "MEMBERS: @$attrMembers\nDESC: $groupNumber  (Count=$#$attrMembers+1)" if $debug > 1;
 	
 	# process members in current group
 	foreach my $member (@$attrMembers) {				
@@ -78,8 +90,8 @@ while ( my ($distinguishedName, $groupAttrs) = each(%$ldapGroups) ) {
 		my $memberAttrs = $ldapMember->{$member};
 		my $memberPhone = $memberAttrs->{$ADfieldTelephone}[0] or next;		
 		
-		print "\nMEMBER: $member" if $debug;
-		print "\tPHONE:$memberPhone" if $debug;		
+		print STDERR "\nMEMBER: $member" if $debug > 1;
+		print STDERR "\tPHONE:$memberPhone" if $debug > 1;		
 		
 		if ($hash -> {$groupNumber}){
 			my $a = $hash -> {$groupNumber};
@@ -88,19 +100,19 @@ while ( my ($distinguishedName, $groupAttrs) = each(%$ldapGroups) ) {
 			$hash -> {$groupNumber} = [$memberPhone];
 		}
 	}
-	print "\n\n" if $debug;	
+	print STDERR "\n\n" if $debug > 1;	
 }	# End of that groups in $ADGroupsSearchBase
 
 while ( my ($groupPhone, $userPhones) = each (%$hash) ) {	
-	print "GROUP: $groupPhone\t PHONES: @$userPhones\n" if $debug;
+	print STDERR "GROUP: $groupPhone\t PHONES: @$userPhones\n" if $debug > 1;
 	#foreach my $userPhone (@$userPhones)	{
-	print "exten => $groupPhone,1,Dial(sip/".join("&sip/",@$userPhones).")\n";
-	
+	print "exten => $groupPhone,1,Dial(sip/" . join('&sip/', @$userPhones) . ")\n";	
 }
+
 exit 0;
 
-#OPERATION - Generating a SEARCH 
-#Params: $base, $searchString, $attrsArray
+#OPERATION - Generating a SEARCH
+# $base, $searchString, $attrsArray
 sub LDAPsearch
 {
 	my ($base, $searchString, $attrs) = @_;
@@ -121,5 +133,5 @@ sub LDAPerror
 		."\nError: " . $mesg->error . " (" . $mesg->error_name . ")"
 		."\nDescripton: " . $mesg->error_desc . ". " . $mesg->error_text;
 	print STDERR $err if $warning;
-	#print "\nServer error: " . $mesg->server_error if $debug;
+	#print STDERR "\nServer error: " . $mesg->server_error if $debug;
 }
